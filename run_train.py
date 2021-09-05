@@ -13,8 +13,8 @@ from config import MAX_LENGTH, BATCH_SIZE, num_layers, d_model, num_heads, dff, 
 
 #划分数据集：训练集和验证集
 train_pairs, val_pairs = train_test_split(pairs, test_size=0.2, random_state=1234)
-
-tokenizer = lambda x: x.split() # 分词器
+#分词器
+tokenizer = lambda x: x.split()
 
 SRC_TEXT = torchtext.legacy.data.Field(sequential=True,
                                 tokenize=tokenizer,
@@ -50,7 +50,6 @@ val_dataloader = DataLoader(val_iter)
 input_vocab_size = len(SRC_TEXT.vocab) # 3901
 target_vocab_size = len(TARG_TEXT.vocab) # 2591
 
-
 transformer = Transformer(num_layers,
                           d_model,
                           num_heads,
@@ -73,9 +72,6 @@ lr_scheduler = CustomSchedule(optimizer, d_model, warm_steps=4000)
 
 
 def train_step(model, inp, targ):
-    # 目标（target）被分成了 tar_inp 和 tar_real
-    # tar_inp 作为输入传递到解码器。
-    # tar_real 是位移了 1 的同一个输入：在 tar_inp 中的每个位置，tar_real 包含了应该被预测到的下一个标记（token）。
     targ_inp = targ[:, :-1]
     targ_real = targ[:, 1:]
 
@@ -87,27 +83,20 @@ def train_step(model, inp, targ):
     enc_padding_mask = enc_padding_mask.to(device)
     combined_mask = combined_mask.to(device)
     dec_padding_mask = dec_padding_mask.to(device)
-    # print('device:', inp.device, targ_inp)
 
-    model.train()  # 设置train mode
+    model.train()  #设置train mode
 
-    optimizer.zero_grad()  # 梯度清零
+    optimizer.zero_grad()  #梯度清零
 
-    # forward
     prediction, _ = transformer(inp, targ_inp, enc_padding_mask, combined_mask, dec_padding_mask)
-    # [b, targ_seq_len, target_vocab_size]
-    # {'..block1': [b, num_heads, targ_seq_len, targ_seq_len],
-    #  '..block2': [b, num_heads, targ_seq_len, inp_seq_len], ...}
 
     loss = mask_loss_func(targ_real, prediction)
     metric = mask_accuracy_func(targ_real, prediction)
 
-    # backward
-    loss.backward()  # 反向传播计算梯度
-    optimizer.step()  # 更新参数
+    loss.backward()   #反向传播计算梯度
+    optimizer.step()  #更新参数
 
     return loss.item(), metric.item()
-
 
 def validate_step(model, inp, targ):
     targ_inp = targ[:, :-1]
@@ -122,31 +111,23 @@ def validate_step(model, inp, targ):
     combined_mask = combined_mask.to(device)
     dec_padding_mask = dec_padding_mask.to(device)
 
-    model.eval()  # 设置eval mode
+    model.eval()  #设置eval mode
 
     with torch.no_grad():
-        # forward
-        prediction, _ = model(inp, targ_inp, enc_padding_mask, combined_mask, dec_padding_mask)
-        # [b, targ_seq_len, target_vocab_size]
-        # {'..block1': [b, num_heads, targ_seq_len, targ_seq_len],
-        #  '..block2': [b, num_heads, targ_seq_len, inp_seq_len], ...}
 
+        prediction, _ = model(inp, targ_inp, enc_padding_mask, combined_mask, dec_padding_mask)
         val_loss = mask_loss_func(targ_real, prediction)
         val_metric = mask_accuracy_func(targ_real, prediction)
 
     return val_loss.item(), val_metric.item()
 
-
 metric_name = 'acc'
-# df_history = pd.DataFrame(columns=['epoch', 'loss', metric_name]) # 记录训练历史信息
 df_history = pd.DataFrame(columns=['epoch', 'loss', metric_name, 'val_loss', 'val_' + metric_name])
-
 
 # 打印时间
 def printbar():
     nowtime = datetime.datetime.now().strftime('%Y-%m_%d %H:%M:%S')
     print('\n' + "=========="*8 + '%s'%nowtime)
-
 
 def train_model(model, epochs, train_dataloader, val_dataloader, print_every):
     starttime = time.time()
@@ -156,13 +137,10 @@ def train_model(model, epochs, train_dataloader, val_dataloader, print_every):
     best_acc = 0.
     for epoch in range(1, epochs + 1):
 
-        # lr_scheduler.step() # 更新学习率
-
         loss_sum = 0.
         metric_sum = 0.
 
         for step, (inp, targ) in enumerate(train_dataloader, start=1):
-            # inp [64, 10] , targ [64, 10]
             loss, metric = train_step(model, inp, targ)
 
             loss_sum += loss
@@ -172,35 +150,27 @@ def train_model(model, epochs, train_dataloader, val_dataloader, print_every):
             if step % print_every == 0:
                 print('*' * 8, f'[step = {step}] loss: {loss_sum / step:.3f}, {metric_name}: {metric_sum / step:.3f}')
 
-            lr_scheduler.step()  # 更新学习率
+            lr_scheduler.step()  #更新学习率
 
-        # 一个epoch的train结束，做一次验证
-        # test(model, train_dataloader)
         val_loss_sum = 0.
         val_metric_sum = 0.
         for val_step, (inp, targ) in enumerate(val_dataloader, start=1):
-            # inp [64, 10] , targ [64, 10]
             loss, metric = validate_step(model, inp, targ)
 
             val_loss_sum += loss
             val_metric_sum += metric
 
-        # 记录和收集1个epoch的训练（和验证）信息
-        # record = (epoch, loss_sum/step, metric_sum/step)
         record = (epoch, loss_sum/step, metric_sum/step, val_loss_sum/val_step, val_metric_sum/val_step)
         df_history.loc[epoch - 1] = record
 
-        # 打印epoch级别的日志
-        # print('*'*8, 'EPOCH = {} loss: {:.3f}, {}: {:.3f}'.format(
-        #        record[0], record[1], metric_name, record[2]))
         print('EPOCH = {} loss: {:.3f}, {}: {:.3f}, val_loss: {:.3f}, val_{}: {:.3f}'.format(
             record[0], record[1], metric_name, record[2], record[3], metric_name, record[4]))
         printbar()
 
         # 保存模型
         # current_acc_avg = metric_sum / step
-        current_acc_avg = val_metric_sum / val_step # 看验证集指标
-        if current_acc_avg > best_acc:  # 保存更好的模型
+        current_acc_avg = val_metric_sum / val_step  #看验证集指标
+        if current_acc_avg > best_acc:               #保存更好的模型
             best_acc = current_acc_avg
             checkpoint = save_dir + '{:03d}_{:.2f}_ckpt.tar'.format(epoch, current_acc_avg)
             if device.type == 'cuda' and ngpu > 1:

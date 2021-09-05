@@ -20,5 +20,5 @@ dropout_rate = 0.1
 MAX_LENGTH = 10
 BATCH_SIZE = 64 * ngpu
 EPOCHS = 40
-# 每50个step做一次打印
+#每50个step做一次打印
 print_trainstep_every = 50
